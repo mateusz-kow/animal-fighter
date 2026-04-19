@@ -1,0 +1,379 @@
+Directory structure:
+└── Scripts/
+    ├── Animal.cs
+    ├── Animal.cs.meta
+    ├── AnimalSpawner.cs
+    ├── AnimalSpawner.cs.meta
+    ├── BoardGenerator.cs
+    ├── BoardGenerator.cs.meta
+    ├── CameraMovement.cs
+    ├── CameraMovement.cs.meta
+    ├── digest.txt.meta
+    ├── GameManager.cs
+    ├── GameManager.cs.meta
+    ├── PlayerController.cs
+    ├── PlayerController.cs.meta
+    ├── Projectile.cs
+    └── Projectile.cs.meta
+
+================================================
+FILE: Animal.cs
+================================================
+using UnityEngine;
+
+public class Animal : MonoBehaviour
+{
+    public Transform targetBurrow;
+    public float speed = 3f;
+    private Animator animator;
+
+    void Start()
+    {
+        animator = GetComponent<Animator>();
+    }
+
+    void Update()
+    {
+        if (targetBurrow == null) return;
+
+        // Obliczamy kierunek ruchu
+        Vector2 directionToTarget = (targetBurrow.position - transform.position).normalized;
+
+        // Poruszanie szczurem
+        transform.position = Vector2.MoveTowards(transform.position, targetBurrow.position, speed * Time.deltaTime);
+
+        // Wybieramy kierunek dla Animatora (podobnie jak u gracza)
+        if (Mathf.Abs(directionToTarget.x) > Mathf.Abs(directionToTarget.y))
+        {
+            animator.SetInteger("direction", directionToTarget.x > 0 ? 3 : 1); // Prawo(3) lub Lewo(1)
+        }
+        else
+        {
+            animator.SetInteger("direction", directionToTarget.y > 0 ? 2 : 0); // GĂłra(2) lub DĂłĹ‚(0)
+        }
+        // -----------------
+
+        if (Vector2.Distance(transform.position, targetBurrow.position) < 0.2f)
+        {
+            Destroy(gameObject);
+        }
+    }
+}
+
+
+================================================
+FILE: Animal.cs.meta
+================================================
+fileFormatVersion: 2
+guid: 9b556e6c95d767343b27c16bffefc23e
+
+
+================================================
+FILE: AnimalSpawner.cs
+================================================
+using UnityEngine;
+
+public class AnimalSpawner : MonoBehaviour
+{
+    public GameObject animalPrefab;
+    private Transform[] burrows;
+    public float spawnRate = 2f;
+
+    void Start() => InvokeRepeating("SpawnAnimal", 1f, spawnRate);
+
+    public void SetBurrows(Transform[] newBurrows) => burrows = newBurrows;
+
+    void SpawnAnimal()
+    {
+        if (burrows == null || burrows.Length < 2) return;
+
+        int start = Random.Range(0, burrows.Length);
+        int end = Random.Range(0, burrows.Length);
+        while(start == end) end = Random.Range(0, burrows.Length);
+
+        GameObject animal = Instantiate(animalPrefab, burrows[start].position, Quaternion.identity);
+        var script = animal.GetComponent<Animal>();
+        script.targetBurrow = burrows[end];
+        script.speed += GameManager.Instance.currentLevel;
+    }
+}
+
+
+================================================
+FILE: AnimalSpawner.cs.meta
+================================================
+fileFormatVersion: 2
+guid: 1ea2ea6d5e9820840a5fc1e19af71f1c
+
+
+================================================
+FILE: BoardGenerator.cs
+================================================
+using UnityEngine;
+using System.Collections.Generic;
+
+public class BoardGenerator : MonoBehaviour
+{
+    public GameObject grassPrefab;
+    public GameObject burrowPrefab;
+
+    public List<Transform> GenerateLevel(int level)
+    {
+        // Usuwamy starÄ… planszÄ™
+        foreach (GameObject obj in GameObject.FindGameObjectsWithTag("Grass")) Destroy(obj);
+        foreach (GameObject obj in GameObject.FindGameObjectsWithTag("Animal")) Destroy(obj);
+        foreach (GameObject obj in GameObject.FindGameObjectsWithTag("Burrow")) Destroy(obj);
+
+        int size = 10 + (level * 4); // Level 1: 10, Level 2: 14
+        List<Transform> burrows = new List<Transform>();
+
+        for (int x = 0; x < size; x++)
+        {
+            for (int y = 0; y < size; y++)
+            {
+                // PodĹ‚oga
+                GameObject g = Instantiate(grassPrefab, new Vector3(x, y, 0), Quaternion.identity);
+                g.tag = "Grass";
+
+                // Norki tylko na rogach
+                if ((x == 0 || x == size - 1) && (y == 0 || y == size - 1))
+                {
+                    GameObject b = Instantiate(burrowPrefab, new Vector3(x, y, 0), Quaternion.identity);
+                    b.tag = "Burrow";
+                    burrows.Add(b.transform);
+                }
+            }
+        }
+        return burrows;
+    }
+}
+
+
+================================================
+FILE: BoardGenerator.cs.meta
+================================================
+fileFormatVersion: 2
+guid: 4fdeb56cb5569434b917726eacd90107
+
+
+================================================
+FILE: CameraMovement.cs
+================================================
+using UnityEngine;
+
+public class CameraMovement : MonoBehaviour
+{
+    public Transform target;
+    public float smoothTime = 0.15f;
+    private Vector3 velocity = Vector3.zero;
+    
+    private float minX, maxX, minY, maxY;
+
+    public void SetBounds(float mapSize)
+    {
+        Camera cam = GetComponent<Camera>();
+        float camHeight = cam.orthographicSize;
+        float camWidth = camHeight * cam.aspect;
+
+        // Kamera nie moĹĽe wyjĹ›Ä‡ poza zakres [0, mapSize]
+        minX = camWidth;
+        maxX = mapSize - camWidth;
+        minY = camHeight;
+        maxY = mapSize - camHeight;
+
+        // JeĹ›li mapa jest mniejsza niĹĽ widok kamery, centrujemy jÄ…
+        if (maxX < minX) { minX = maxX = mapSize / 2; }
+        if (maxY < minY) { minY = maxY = mapSize / 2; }
+    }
+
+    void LateUpdate()
+    {
+        if (!target) return;
+        Vector3 targetPos = new Vector3(target.position.x, target.position.y, transform.position.z);
+        
+        Vector3 smoothed = Vector3.SmoothDamp(transform.position, targetPos, ref velocity, smoothTime);
+        
+        transform.position = new Vector3(
+            Mathf.Clamp(smoothed.x, minX, maxX),
+            Mathf.Clamp(smoothed.y, minY, maxY),
+            transform.position.z
+        );
+    }
+}
+
+
+================================================
+FILE: CameraMovement.cs.meta
+================================================
+fileFormatVersion: 2
+guid: ba80aa97b197cb2439f83ebbba737f93
+
+
+================================================
+FILE: digest.txt.meta
+================================================
+fileFormatVersion: 2
+guid: e08d6325986e6884e8706101c629e62f
+TextScriptImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+
+
+================================================
+FILE: GameManager.cs
+================================================
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class GameManager : MonoBehaviour
+{
+    public static GameManager Instance;
+    public BoardGenerator generator;
+    public AnimalSpawner spawner;
+    public PlayerController player;
+    public CameraMovement cam;
+
+    public int currentLevel = 1;
+    public int animalsToCatch = 5;
+    public float timeLimit = 30f;
+    
+    private int caughtCount = 0;
+    private float timer;
+    private float volume = 0.5f;
+    private float mapSize;
+
+    void Awake() => Instance = this;
+
+    void Start() => SetupLevel();
+
+    void SetupLevel()
+    {
+        caughtCount = 0;
+        timer = timeLimit / currentLevel;
+        animalsToCatch = 5 * currentLevel;
+        
+        // Generujemy planszÄ™ i odbieramy norki
+        var burrows = generator.GenerateLevel(currentLevel);
+        mapSize = 10 + (currentLevel * 4) - 1; // Rozmiar od 0 do N
+
+        // Konfigurujemy spawner
+        spawner.SetBurrows(burrows.ToArray());
+        
+        // Konfigurujemy gracza (limity poruszania)
+        player.SetBounds(mapSize);
+        player.transform.position = new Vector3(mapSize/2, mapSize/2, 0);
+
+        // Konfigurujemy kamerÄ™ (limity widzenia)
+        cam.SetBounds(mapSize);
+    }
+
+    void Update()
+    {
+        timer -= Time.deltaTime;
+        if (timer <= 0) SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    public void CatchAnimal()
+    {
+        caughtCount++;
+        if (caughtCount >= animalsToCatch)
+        {
+            currentLevel++;
+            SetupLevel();
+        }
+    }
+
+    void OnGUI()
+    {
+        GUI.Box(new Rect(10, 10, 250, 30), $"Level: {currentLevel} | Czas: {timer:F1} | Cel: {caughtCount}/{animalsToCatch}");
+        
+        GUI.Label(new Rect(10, 50, 100, 20), "GĹ‚oĹ›noĹ›Ä‡:");
+        volume = GUI.HorizontalSlider(new Rect(100, 55, 100, 30), volume, 0f, 1f);
+        AudioListener.volume = volume;
+    }
+}
+
+
+================================================
+FILE: GameManager.cs.meta
+================================================
+fileFormatVersion: 2
+guid: 5fc71155e644bf34fbf5dab810ee34d3
+
+
+================================================
+FILE: PlayerController.cs
+================================================
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+public class PlayerController : MonoBehaviour
+{
+    public float speed = 5f;
+    public GameObject projectilePrefab;
+    private Vector2 moveInput;
+    private Rigidbody2D rb;
+    private float maxBound;
+
+    void Start() => rb = GetComponent<Rigidbody2D>();
+
+    public void SetBounds(float size) => maxBound = size;
+
+    public void OnMove(InputAction.CallbackContext context) => moveInput = context.ReadValue<Vector2>();
+
+    public void OnFire(InputAction.CallbackContext context)
+    {
+        if (context.performed && projectilePrefab != null)
+        {
+            GameObject ball = Instantiate(projectilePrefab, transform.position, Quaternion.identity);
+            Vector2 dir = moveInput == Vector2.zero ? Vector2.up : moveInput.normalized;
+            ball.GetComponent<Rigidbody2D>().linearVelocity = dir * 10f;
+        }
+    }
+
+    void FixedUpdate()
+    {
+        Vector2 nextPos = rb.position + moveInput * speed * Time.fixedDeltaTime;
+        // Blokada wychodzenia poza planszÄ™
+        nextPos.x = Mathf.Clamp(nextPos.x, 0, maxBound);
+        nextPos.y = Mathf.Clamp(nextPos.y, 0, maxBound);
+        rb.MovePosition(nextPos);
+    }
+}
+
+
+================================================
+FILE: PlayerController.cs.meta
+================================================
+fileFormatVersion: 2
+guid: 128ab0de2954554419e083b7fa2c908b
+
+
+================================================
+FILE: Projectile.cs
+================================================
+using UnityEngine;
+
+public class Projectile : MonoBehaviour
+{
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("Animal"))
+        {
+            FindObjectOfType<GameManager>().CatchAnimal();
+            Destroy(other.gameObject);
+            Destroy(gameObject);
+        }
+    }
+}
+
+
+================================================
+FILE: Projectile.cs.meta
+================================================
+fileFormatVersion: 2
+guid: 5a0044dcbf29de3499f586ed11e37749
+
